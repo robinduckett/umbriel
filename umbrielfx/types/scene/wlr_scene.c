@@ -301,6 +301,10 @@ void wlr_scene_node_destroy(struct wlr_scene_node* node) {
 
     struct wlr_scene_node *child, *child_tmp;
     wl_list_for_each_safe(child, child_tmp, &scene_tree->children, link) { wlr_scene_node_destroy(child); }
+  } else if (node->type == WLR_SCENE_NODE_OPTIMIZED_BLUR) {
+    struct wlr_scene_optimized_blur* optimized = wlr_scene_optimized_blur_from_node(node);
+    pixman_region32_fini(&optimized->capture_region);
+    pixman_region32_fini(&optimized->write_region);
   } else if (node->type == WLR_SCENE_NODE_BLUR) {
     struct wlr_scene_blur* blur = wlr_scene_blur_from_node(node);
     linked_node_destroy(&blur->transparency_mask_source);
@@ -1740,6 +1744,8 @@ struct wlr_scene_optimized_blur* wlr_scene_optimized_blur_create(struct wlr_scen
   scene_blur->width = width;
   scene_blur->height = height;
   scene_blur->dirty = false;
+  pixman_region32_init(&scene_blur->capture_region);
+  pixman_region32_init(&scene_blur->write_region);
 
   scene_node_update(&scene_blur->node, NULL);
 
@@ -1765,6 +1771,9 @@ void wlr_scene_optimized_blur_mark_dirty(struct wlr_scene_optimized_blur* blur_n
   }
 
   blur_node->dirty = true;
+  blur_node->partial = false;
+  pixman_region32_clear(&blur_node->capture_region);
+  pixman_region32_clear(&blur_node->write_region);
 
   scene_node_update(&blur_node->node, NULL);
 }
@@ -2784,9 +2793,18 @@ static void scene_entry_render(struct render_list_entry* entry, const struct ren
           .blur_data = &scene->blur_data,
           .blur_strength = 1.0f,
       };
+      if (scene_blur->partial) {
+        blur_options.capture_region = &scene_blur->capture_region;
+        blur_options.write_region = &scene_blur->write_region;
+        blur_options.sample_clamp = &scene_blur->sample_clamp;
+      }
       bool result = fx_render_pass_add_optimized_blur(fx_pass, &blur_options);
       if (result) {
         scene_blur->dirty = false;
+        scene_blur->partial = false;
+        pixman_region32_clear(&scene_blur->capture_region);
+        pixman_region32_clear(&scene_blur->write_region);
+        scene_blur->sample_clamp = (struct wlr_box){0};
       }
     }
     break;
@@ -4464,4 +4482,38 @@ void wlr_scene_output_for_each_buffer(
   struct wlr_box box = {.x = scene_output->x, .y = scene_output->y};
   wlr_output_effective_resolution(scene_output->output, &box.width, &box.height);
   scene_output_for_each_scene_buffer(&box, &scene_output->scene->tree.node, 0, 0, iterator, user_data);
+}
+
+int wlr_scene_blur_reach(struct wlr_scene* scene) { return scene != NULL ? blur_data_calc_size(&scene->blur_data) : 0; }
+
+void wlr_scene_optimized_blur_capture(
+    struct wlr_scene_optimized_blur* blur_node, struct wlr_scene_output* scene_output, const pixman_region32_t* capture,
+    const pixman_region32_t* write, const struct wlr_box* sample_clamp
+) {
+  if (blur_node == NULL || !blur_node->node.enabled || pixman_region32_empty(capture)) {
+    return;
+  }
+  if (blur_node->dirty && !blur_node->partial) {
+    return; // a full capture is already pending
+  }
+  blur_node->dirty = true;
+  blur_node->partial = true;
+  pixman_region32_union(&blur_node->capture_region, &blur_node->capture_region, capture);
+  pixman_region32_union(&blur_node->write_region, &blur_node->write_region, write);
+  blur_node->sample_clamp = sample_clamp != NULL ? *sample_clamp : (struct wlr_box){0};
+
+  // Damage only the captured area (layout coordinates) so the renderer redraws
+  // exactly what the capture needs beneath the node.
+  pixman_region32_t layout;
+  pixman_region32_init(&layout);
+  const float scale = scene_output->output->scale;
+  wlr_region_scale(&layout, capture, 1.0f / scale);
+  wlr_region_expand(&layout, &layout, 1);
+  pixman_region32_translate(&layout, scene_output->x, scene_output->y);
+  scene_damage_outputs(scene_output->scene, &layout);
+  pixman_region32_fini(&layout);
+}
+
+void wlr_scene_output_get_pending_damage(struct wlr_scene_output* scene_output, pixman_region32_t* out) {
+  pixman_region32_copy(out, &scene_output->pending_commit_damage);
 }

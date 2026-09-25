@@ -105,6 +105,18 @@ namespace umbriel {
 
     wlr_scene_node_set_enabled(&m_node->node, true);
     wlr_scene_node_set_position(&m_node->node, drawBox.x, drawBox.y);
+    // Hint the shared-blur capture at the part that really shows blur: surfaces
+    // with a shadow margin usually limit their input region to the visible body.
+    m_node->sample_hint = {};
+    if (surface != nullptr && pixman_region32_not_empty(&surface->input_region)) {
+      const pixman_box32_t* e = pixman_region32_extents(&surface->input_region);
+      wlr_box input{surfaceBox.x + e->x1, surfaceBox.y + e->y1, e->x2 - e->x1, e->y2 - e->y1};
+      wlr_box inside{};
+      if (wlr_box_intersection(&inside, &input, &drawBox)
+          && (inside.width < drawBox.width || inside.height < drawBox.height)) {
+        m_node->sample_hint = {inside.x - drawBox.x, inside.y - drawBox.y, inside.width, inside.height};
+      }
+    }
     if (m_node->width != drawBox.width || m_node->height != drawBox.height) {
       wlr_scene_blur_set_size(m_node, drawBox.width, drawBox.height);
     }

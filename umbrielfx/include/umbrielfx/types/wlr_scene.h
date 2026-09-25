@@ -212,12 +212,23 @@ struct wlr_scene_blur {
 	bool should_only_blur_bottom_layer;
 
 	struct linked_node transparency_mask_source;
+
+	// Node-local area that actually shows blur, if known (e.g. a surface's
+	// input region excluding a shadow margin). Empty = the whole node.
+	struct wlr_box sample_hint;
 };
 
 /** A scene-graph node telling SceneFX to render the optimized blur */
 struct wlr_scene_optimized_blur {
 	struct wlr_scene_node node;
 	int width, height;
+	// Partial capture (output buffer coordinates), set by
+	// wlr_scene_optimized_blur_capture(). When non-empty, only this region is
+	// re-captured and only write_region is written back.
+	pixman_region32_t capture_region;
+	pixman_region32_t write_region;
+	struct wlr_box sample_clamp; // keep blur samples inside this box; empty = off
+	bool partial;
 
 	bool dirty;
 };
@@ -1020,6 +1031,21 @@ struct wlr_scene_output_state_options {
  * is needed and an output commit can be skipped for the current frame.
  */
 bool wlr_scene_output_needs_frame(struct wlr_scene_output *scene_output);
+/** Returns how far (in buffer pixels) the scene's blur samples beyond a pixel. */
+int wlr_scene_blur_reach(struct wlr_scene *scene);
+/**
+ * Re-capture part of an optimized blur node on one output (dirty-rect capture).
+ * `capture` is re-rendered beneath the node and blurred, `write` (a subset
+ * whose blur samples stay within `capture`) is written back. Regions are in
+ * the output's buffer coordinates. `sample_clamp` optionally keeps samples
+ * inside a box. Accumulates until the next render.
+ */
+void wlr_scene_optimized_blur_capture(struct wlr_scene_optimized_blur *blur_node,
+	struct wlr_scene_output *scene_output, const pixman_region32_t *capture,
+	const pixman_region32_t *write, const struct wlr_box *sample_clamp);
+/** Copies the damage pending for the next frame (output buffer coordinates). */
+void wlr_scene_output_get_pending_damage(struct wlr_scene_output *scene_output,
+	pixman_region32_t *out);
 
 /**
  * Render and commit an output.

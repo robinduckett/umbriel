@@ -2300,6 +2300,9 @@ bool fx_render_pass_add_optimized_blur(
 
   pixman_region32_t clip;
   pixman_region32_init_rect(&clip, dst_box.x, dst_box.y, dst_box.width, dst_box.height);
+  if (fx_options->capture_region != NULL) {
+    pixman_region32_intersect(&clip, &clip, fx_options->capture_region);
+  }
 
   // Render the blur into its own buffer
   struct fx_offscreen_buffers* fbos = pass->fx_offscreen_buffers;
@@ -2311,14 +2314,28 @@ bool fx_render_pass_add_optimized_blur(
     struct fx_render_blur_pass_options blur_options = *fx_options;
     blur_options.current_buffer = backdrop;
     blur_options.tex_options.base.clip = &clip;
-    fx_buffer = get_main_buffer_blur(pass, &blur_options, false);
+    const bool clamp = fx_options->sample_clamp != NULL && !wlr_box_empty(fx_options->sample_clamp);
+    if (clamp) {
+      blur_options.tex_options.clip_box = fx_options->sample_clamp;
+    }
+    fx_buffer = get_main_buffer_blur(pass, &blur_options, clamp);
   }
   if (fx_buffer != NULL) {
+    // A partial capture writes back only the pixels whose blur samples stayed
+    // inside the re-rendered region.
+    pixman_region32_t write_clip;
+    pixman_region32_init(&write_clip);
+    if (fx_options->write_region != NULL) {
+      pixman_region32_intersect(&write_clip, fx_options->write_region, &clip);
+    } else {
+      pixman_region32_copy(&write_clip, &clip);
+    }
     // Render the newly blurred content into the blur_buffer
-    fx_render_pass_read_to_buffer(pass, &clip, blur_buffer, fx_buffer);
+    fx_render_pass_read_to_buffer(pass, &write_clip, blur_buffer, fx_buffer);
 
     // Save the current scene pass state
-    fx_render_pass_read_to_buffer(pass, &clip, no_blur_buffer, backdrop);
+    fx_render_pass_read_to_buffer(pass, &write_clip, no_blur_buffer, backdrop);
+    pixman_region32_fini(&write_clip);
   }
 
   pixman_region32_fini(&clip);

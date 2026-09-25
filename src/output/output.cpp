@@ -26,6 +26,7 @@
 #include "workspace/workspace.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <drm_fourcc.h>
@@ -828,6 +829,125 @@ namespace umbriel {
     }
   }
 
+  bool Output::blurCapturesWindows() {
+    static const bool enabled = [] {
+      const char* v = std::getenv("UMBRIEL_BLUR_CAPTURE");
+      return v != nullptr && std::string_view(v) == "windows";
+    }();
+    return enabled;
+  }
+
+  namespace {
+    // Boxes of enabled blur nodes that sample the shared (optimized) capture.
+    void collectSharedBlurBoxes(wlr_scene_node* node, std::vector<wlr_box>& boxes) {
+      if (!node->enabled) {
+        return;
+      }
+      if (node->type == WLR_SCENE_NODE_TREE) {
+        wlr_scene_tree* tree = wlr_scene_tree_from_node(node);
+        wlr_scene_node* child;
+        wl_list_for_each(child, &tree->children, link) { collectSharedBlurBoxes(child, boxes); }
+        return;
+      }
+      if (node->type != WLR_SCENE_NODE_BLUR) {
+        return;
+      }
+      wlr_scene_blur* blur = wlr_scene_blur_from_node(node);
+      if (!blur->should_only_blur_bottom_layer || blur->width <= 0 || blur->height <= 0) {
+        return;
+      }
+      int lx = 0;
+      int ly = 0;
+      if (wlr_scene_node_coords(node, &lx, &ly)) {
+        if (!wlr_box_empty(&blur->sample_hint)) {
+          boxes.push_back(
+              {lx + blur->sample_hint.x, ly + blur->sample_hint.y, blur->sample_hint.width, blur->sample_hint.height}
+          );
+        } else {
+          boxes.push_back({lx, ly, blur->width, blur->height});
+        }
+      }
+    }
+  } // namespace
+
+  // Dirty-rect capture of the shared blur backdrop (like a CABackdropLayer
+  // group): only the blurred shell surfaces' areas are captured, and each frame
+  // only the part whose blur can have changed is re-rendered and re-blurred.
+  void Output::updateBlurCapture() {
+    std::vector<wlr_box> cores;
+    for (wlr_scene_tree* tree :
+         {m_layerTrees[ZWLR_LAYER_SHELL_V1_LAYER_TOP], m_layerTrees[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], m_popupTree}) {
+      if (tree != nullptr) {
+        collectSharedBlurBoxes(&tree->node, cores);
+      }
+    }
+    const float scale = m_output->scale;
+    int bw = 0;
+    int bh = 0;
+    wlr_output_transformed_resolution(m_output, &bw, &bh);
+
+    BlurRegion core;
+    for (const wlr_box& box : cores) {
+      const int x0 = static_cast<int>(std::floor((box.x - m_sceneOutput->x) * scale));
+      const int y0 = static_cast<int>(std::floor((box.y - m_sceneOutput->y) * scale));
+      const int x1 = static_cast<int>(std::ceil((box.x + box.width - m_sceneOutput->x) * scale));
+      const int y1 = static_cast<int>(std::ceil((box.y + box.height - m_sceneOutput->y) * scale));
+      pixman_region32_union_rect(&core.r, &core.r, x0, y0, x1 - x0, y1 - y0);
+    }
+    pixman_region32_intersect_rect(&core.r, &core.r, 0, 0, bw, bh);
+
+    const int regions = static_cast<int>(cores.size());
+    const int reach = wlr_scene_blur_reach(m_server->scene());
+    // A lone surface (usually the bar) blurs only what's directly behind it:
+    // no margin, samples clamped to itself, so windows beneath it don't count.
+    // With two or more, every surface gets the blur's reach so they meet seamlessly.
+    const bool padded = regions >= 2;
+    BlurRegion area;
+    wlr_region_expand(&area.r, &core.r, padded ? reach : 0);
+    pixman_region32_intersect_rect(&area.r, &area.r, 0, 0, bw, bh);
+    wlr_box clamp{};
+    if (regions == 1) {
+      const pixman_box32_t* e = pixman_region32_extents(&core.r);
+      clamp = {e->x1, e->y1, e->x2 - e->x1, e->y2 - e->y1};
+    }
+
+    // Newly covered area (or everything after a mode change) needs a full capture.
+    BlurRegion fresh;
+    if (m_blurCaptureAll || padded != (m_blurPrevRegions >= 2)) {
+      pixman_region32_copy(&fresh.r, &area.r);
+    } else {
+      pixman_region32_subtract(&fresh.r, &area.r, &m_blurPrevArea.r);
+    }
+
+    // What changed under the surfaces.
+    BlurRegion damage;
+    wlr_scene_output_get_pending_damage(m_sceneOutput, &damage.r);
+    pixman_region32_union(&damage.r, &damage.r, &fresh.r);
+    pixman_region32_intersect(&damage.r, &damage.r, &area.r);
+
+    // Blurred pixels that can have changed, and what must be re-rendered for them.
+    BlurRegion write;
+    wlr_region_expand(&write.r, &damage.r, reach);
+    pixman_region32_intersect(&write.r, &write.r, &core.r);
+    if (pixman_region32_empty(&write.r)) {
+      pixman_region32_copy(&m_blurPrevArea.r, &area.r);
+      m_blurPrevRegions = regions;
+      m_blurCaptureAll = false;
+      return;
+    }
+
+    BlurRegion capture;
+    wlr_region_expand(&capture.r, &write.r, reach);
+    pixman_region32_intersect(&capture.r, &capture.r, &area.r);
+    wlr_scene_optimized_blur_capture(
+        m_optimizedBlur, m_sceneOutput, &capture.r, &write.r, regions == 1 ? &clamp : nullptr
+    );
+
+    pixman_region32_copy(&m_blurPrevArea.r, &area.r);
+    m_blurPrevRegions = regions;
+    m_blurCaptureAll = false;
+  }
+
   void Output::updateOptimizedBlur(const wlr_box& fullArea) {
     const auto& blur = config().appearance.blur;
     if (!blur.enabled || !config().optimizedBlurNeeded()) {
@@ -842,11 +962,18 @@ namespace umbriel {
     }
 
     if (m_optimizedBlur == nullptr) {
-      m_optimizedBlur = wlr_scene_optimized_blur_create(
-          m_server->shellLayerTree(ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND), fullArea.width, fullArea.height
-      );
+      // Experimental: capture the shared blur above the windows, just under the top
+      // layer, so panels using optimized blur all sample one continuous backdrop of
+      // wallpaper + windows (and never each other).
+      const uint32_t captureLayer =
+          blurCapturesWindows() ? ZWLR_LAYER_SHELL_V1_LAYER_TOP : ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+      m_optimizedBlur =
+          wlr_scene_optimized_blur_create(m_server->shellLayerTree(captureLayer), fullArea.width, fullArea.height);
       if (m_optimizedBlur == nullptr) {
         return;
+      }
+      if (blurCapturesWindows()) {
+        wlr_scene_node_lower_to_bottom(&m_optimizedBlur->node);
       }
     }
 
@@ -859,10 +986,12 @@ namespace umbriel {
     wlr_scene_optimized_blur_set_size(m_optimizedBlur, fullArea.width, fullArea.height);
     if (changed) {
       wlr_scene_optimized_blur_mark_dirty(m_optimizedBlur);
+      m_blurCaptureAll = true;
     }
   }
 
   void Output::markBlurBackgroundDirty() {
+    m_blurCaptureAll = true;
     if (m_optimizedBlur != nullptr) {
       wlr_scene_optimized_blur_mark_dirty(m_optimizedBlur);
     }
@@ -1080,6 +1209,11 @@ namespace umbriel {
     // "nothing to render" path, they never commit again -> damage stays clean -> wlr_scene_output_needs_frame returns
     // false forever -> compositor parks in epoll_wait. (Reproducible with any mailbox/FIFO Vulkan game.)
     bool commitFailed = false;
+    // Keep the shared blur backdrop current where the blurred shell surfaces
+    // need it. May add damage, so it runs before deciding whether to render.
+    if (blurCapturesWindows() && m_optimizedBlur != nullptr && wlr_scene_output_needs_frame(m_sceneOutput)) {
+      updateBlurCapture();
+    }
     const bool sceneChanged = wlr_scene_output_needs_frame(m_sceneOutput);
     if (sceneChanged) {
       // Scene motion under a stationary cursor must reach the client before its next press.

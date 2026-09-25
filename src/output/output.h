@@ -6,8 +6,10 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <pixman.h>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <wayland-server-core.h>
 
 struct wlr_gamma_control_v1;
@@ -140,6 +142,8 @@ namespace umbriel {
     wlr_output_layout_output* addToLayout();
     void arrangeLayer(wlr_scene_tree* tree, const wlr_box* fullArea, wlr_box* usableArea, bool exclusive);
     void updateOptimizedBlur(const wlr_box& fullArea);
+    static bool blurCapturesWindows();
+    void updateBlurCapture();
 
     Server* m_server = nullptr;
     wlr_output* m_output = nullptr;
@@ -151,6 +155,16 @@ namespace umbriel {
     wlr_scene_tree* m_fullscreenRoot = nullptr;
     wlr_scene_tree* m_pinnedRoot = nullptr;
     wlr_scene_optimized_blur* m_optimizedBlur = nullptr;
+    struct BlurRegion {
+      pixman_region32_t r;
+      BlurRegion() { pixman_region32_init(&r); }
+      ~BlurRegion() { pixman_region32_fini(&r); }
+      BlurRegion(const BlurRegion&) = delete;
+      BlurRegion& operator=(const BlurRegion&) = delete;
+    };
+    BlurRegion m_blurPrevArea;
+    int m_blurPrevRegions = -1;
+    bool m_blurCaptureAll = true;
     std::unique_ptr<WorkspaceGroup> m_workspaceGroup;
     wlr_box m_localUsableArea{};
     int m_arrangedLayoutX = 0;
