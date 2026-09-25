@@ -339,6 +339,9 @@ namespace umbriel {
       if (rule.optimized) {
         resolved.optimized = rule.optimized;
       }
+      if (rule.shared) {
+        resolved.shared = rule.shared;
+      }
     }
     return resolved;
   }

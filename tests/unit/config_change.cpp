@@ -223,6 +223,30 @@ UMBRIEL_TEST(borderColorChangesAreColorChangesThatRefreshChrome) {
   CHECK(!effects.sceneBlur);
 }
 
+UMBRIEL_TEST(sharedBlurRuleCreatesTheSharedBackdrop) {
+  const Config before;
+  CHECK(!before.sharedBlurNeeded());
+
+  // A rule that asks for the shared backdrop has to create its capture on every output, and the matching layer
+  // surfaces re-apply their blur.
+  Config shared = before;
+  LayerRule rule;
+  rule.shared = true;
+  shared.layerRules.push_back(rule);
+  CHECK(shared.sharedBlurNeeded());
+  const ConfigEffects effects = ConfigEffects::between(before, shared);
+  CHECK(effects.sceneBlur);
+  CHECK(effects.layerEffects);
+  CHECK(!effects.viewChrome);
+
+  Config optedOut = before;
+  LayerRule plain;
+  plain.shared = false;
+  optedOut.layerRules.push_back(plain);
+  CHECK(!optedOut.sharedBlurNeeded());
+  CHECK(!ConfigEffects::between(before, optedOut).sceneBlur);
+}
+
 UMBRIEL_TEST(listSectionsAreCompared) {
   const Config before;
 

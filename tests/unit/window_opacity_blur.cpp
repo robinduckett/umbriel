@@ -1,5 +1,6 @@
 #include "check.h"
 #include "config/config.h"
+#include "scene/surface_blur.h"
 #include "view/decoration.h"
 
 // clang-format off
@@ -71,6 +72,41 @@ UMBRIEL_TEST(transitionOpacityStillAttenuatesBlur) {
   CHECK(blur != nullptr);
   if (blur != nullptr) {
     CHECK_EQ(blur->alpha, 0.5F);
+  }
+
+  wlr_scene_node_destroy(&scene->tree.node);
+}
+
+// A surface that shares the blur backdrop samples the shared capture, never the cached background, whatever its
+// optimized setting says. Without `shared`, the optimized setting picks the cached background as before.
+UMBRIEL_TEST(sharedBlurSamplesTheSharedBackdrop) {
+  wlr_scene* scene = wlr_scene_create();
+  CHECK(scene != nullptr);
+  if (scene == nullptr) {
+    return;
+  }
+  const wlr_box box{0, 0, 100, 100};
+
+  umbriel::SurfaceBlur sharing;
+  wlr_scene_tree* sharingTree = wlr_scene_tree_create(&scene->tree);
+  sharing.update(
+      sharingTree, nullptr, box, box, 0, nullptr,
+      umbriel::SurfaceBlurOptions{.ignoreAlpha = 0.0F, .enabled = true, .optimized = true, .shared = true}, 0.8F
+  );
+  if (wlr_scene_blur* blur = onlyBlurChild(*sharingTree)) {
+    CHECK(blur->use_shared_blur);
+    CHECK(!blur->should_only_blur_bottom_layer);
+  }
+
+  umbriel::SurfaceBlur optimized;
+  wlr_scene_tree* optimizedTree = wlr_scene_tree_create(&scene->tree);
+  optimized.update(
+      optimizedTree, nullptr, box, box, 0, nullptr,
+      umbriel::SurfaceBlurOptions{.ignoreAlpha = 0.0F, .enabled = true, .optimized = true, .shared = false}, 0.8F
+  );
+  if (wlr_scene_blur* blur = onlyBlurChild(*optimizedTree)) {
+    CHECK(!blur->use_shared_blur);
+    CHECK(blur->should_only_blur_bottom_layer);
   }
 
   wlr_scene_node_destroy(&scene->tree.node);

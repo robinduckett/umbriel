@@ -274,6 +274,7 @@ namespace umbriel {
         .ignoreAlpha = static_cast<float>(m_rule.ignoreAlpha.value_or(0.0)),
         .enabled = m_rule.blur.value_or(false),
         .optimized = m_rule.optimized,
+        .shared = m_rule.shared.value_or(false) && m_layerSurface->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_TOP,
     };
   }
 

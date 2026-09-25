@@ -14,6 +14,10 @@ namespace umbriel {
     float ignoreAlpha = 0.0F;
     std::optional<bool> enabled;
     std::optional<bool> optimized;
+    // Sample the output's shared blur backdrop, captured above the windows, instead of the cached background or the
+    // live backdrop. Only top-layer surfaces may: anything below the capture would sample itself, and anything above
+    // the top layer would miss fullscreen and pinned windows beneath it.
+    bool shared = false;
   };
 
   // True when the surface's opaque region does not cover surfaceBox, given in surface-local coordinates.

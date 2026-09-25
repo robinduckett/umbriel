@@ -997,17 +997,20 @@ UMBRIEL_TEST(layerRulesMergeMatchingFieldsInOrder) {
   second.namespaceRegex = std::regex(second.namespacePattern);
   second.ignoreAlpha = 0.75;
   second.optimized = true;
+  second.shared = true;
   config.layerRules.push_back(std::move(second));
 
   const auto resolved = umbriel::resolveLayerRules(config, "panel");
   CHECK(resolved.blur && *resolved.blur);
   CHECK(resolved.ignoreAlpha && *resolved.ignoreAlpha == 0.75);
   CHECK(resolved.optimized && *resolved.optimized);
+  CHECK(resolved.shared && *resolved.shared);
 
   const auto unmatched = umbriel::resolveLayerRules(config, "wallpaper");
   CHECK(!unmatched.blur);
   CHECK(!unmatched.ignoreAlpha);
   CHECK(!unmatched.optimized);
+  CHECK(!unmatched.shared);
 
   LayerRule blank;
   blank.namespacePattern = "^$";

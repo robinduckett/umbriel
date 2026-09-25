@@ -987,6 +987,25 @@ UMBRIEL_TEST(overviewBackgroundBlurLoads) {
   CHECK(!store.config().overview.backgroundBlur);
 }
 
+UMBRIEL_TEST(layerRuleBlurSharedLoads) {
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write("[[layer_rule]]\nmatch.namespace = \"^bar$\"\nblur = true\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().layerRules.size() == 1);
+  CHECK(!store.config().layerRules[0].shared);
+  CHECK(!store.config().sharedBlurNeeded());
+
+  file.write("[[layer_rule]]\nmatch.namespace = \"^bar$\"\nblur = true\nblur_shared = true\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().layerRules.size() == 1);
+  CHECK(store.config().layerRules[0].shared.value_or(false));
+  CHECK(store.config().sharedBlurNeeded());
+  CHECK(!containsDiagnostic(store, "blur_shared"));
+}
+
 UMBRIEL_TEST(overviewScrollFactorLoadsIndependently) {
   const TempConfig file;
   ConfigStore& store = umbriel::configStore();

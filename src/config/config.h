@@ -419,6 +419,7 @@ namespace umbriel {
     std::optional<bool> blurPopups;
     std::optional<double> ignoreAlpha;
     std::optional<bool> optimized;
+    std::optional<bool> shared;
 
     // See WindowRule: the regex is derived from the pattern.
     [[nodiscard]] bool operator==(const LayerRule& other) const {
@@ -426,7 +427,8 @@ namespace umbriel {
           && blur == other.blur
           && blurPopups == other.blurPopups
           && ignoreAlpha == other.ignoreAlpha
-          && optimized == other.optimized;
+          && optimized == other.optimized
+          && shared == other.shared;
     }
   };
 
@@ -435,6 +437,7 @@ namespace umbriel {
     std::optional<bool> blurPopups;
     std::optional<double> ignoreAlpha;
     std::optional<bool> optimized;
+    std::optional<bool> shared;
     bool operator==(const ResolvedLayerRule&) const = default;
   };
 
@@ -869,6 +872,17 @@ namespace umbriel {
       }
       for (const LayerRule& rule : layerRules) {
         if (rule.optimized.value_or(false)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // True when a layer rule may ask for the shared blur backdrop, so every
+    // output has to keep its shared blur node alive.
+    [[nodiscard]] bool sharedBlurNeeded() const {
+      for (const LayerRule& rule : layerRules) {
+        if (rule.shared.value_or(false)) {
           return true;
         }
       }

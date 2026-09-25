@@ -716,6 +716,10 @@ namespace umbriel {
       wlr_scene_node_destroy(&m_optimizedBlur->node);
       m_optimizedBlur = nullptr;
     }
+    if (m_sharedBlur != nullptr) {
+      wlr_scene_node_destroy(&m_sharedBlur->node);
+      m_sharedBlur = nullptr;
+    }
     for (wlr_scene_tree* root : {m_viewRoot, m_fullscreenRoot, m_pinnedRoot}) {
       if (root != nullptr) {
         wlr_scene_node_destroy(&root->node);
@@ -788,6 +792,7 @@ namespace umbriel {
       arrangeLayer(m_layerTrees[layer], &layerArea, &usableArea, false);
     }
     updateOptimizedBlur(outputArea);
+    updateSharedBlur(outputArea);
 
     // Layer trees are output-local; pin them to the scene-output origin.
     for (auto& m_layerTree : m_layerTrees) {
@@ -859,6 +864,42 @@ namespace umbriel {
     wlr_scene_optimized_blur_set_size(m_optimizedBlur, fullArea.width, fullArea.height);
     if (changed) {
       wlr_scene_optimized_blur_mark_dirty(m_optimizedBlur);
+    }
+  }
+
+  void Output::updateSharedBlur(const wlr_box& fullArea) {
+    if (!config().appearance.blur.enabled || !config().sharedBlurNeeded()) {
+      if (m_sharedBlur != nullptr) {
+        wlr_scene_node_destroy(&m_sharedBlur->node);
+        m_sharedBlur = nullptr;
+        fx_renderer_clear_shared_blur_buffer(m_output);
+      }
+      return;
+    }
+
+    if (m_sharedBlur == nullptr) {
+      // At the bottom of the top layer, the capture holds the windows but none of the surfaces that share it, so
+      // they never sample each other.
+      m_sharedBlur = wlr_scene_optimized_blur_create(
+          m_server->shellLayerTree(ZWLR_LAYER_SHELL_V1_LAYER_TOP), fullArea.width, fullArea.height
+      );
+      if (m_sharedBlur == nullptr) {
+        return;
+      }
+      wlr_scene_optimized_blur_set_shared(m_sharedBlur, true);
+      wlr_scene_node_lower_to_bottom(&m_sharedBlur->node);
+      m_blurBackdrop.invalidate();
+    }
+
+    const bool changed = m_sharedBlur->node.x != m_sceneOutput->x
+        || m_sharedBlur->node.y != m_sceneOutput->y
+        || m_sharedBlur->width != fullArea.width
+        || m_sharedBlur->height != fullArea.height;
+    wlr_scene_node_set_enabled(&m_sharedBlur->node, true);
+    wlr_scene_node_set_position(&m_sharedBlur->node, m_sceneOutput->x, m_sceneOutput->y);
+    wlr_scene_optimized_blur_set_size(m_sharedBlur, fullArea.width, fullArea.height);
+    if (changed) {
+      m_blurBackdrop.invalidate();
     }
   }
 
@@ -1080,6 +1121,11 @@ namespace umbriel {
     // "nothing to render" path, they never commit again -> damage stays clean -> wlr_scene_output_needs_frame returns
     // false forever -> compositor parks in epoll_wait. (Reproducible with any mailbox/FIFO Vulkan game.)
     bool commitFailed = false;
+    // Keep the shared blur backdrop current beneath the surfaces that share it. A capture adds damage, so this runs
+    // before deciding whether to render.
+    if (m_sharedBlur != nullptr && wlr_scene_output_needs_frame(m_sceneOutput)) {
+      m_blurBackdrop.update(m_sharedBlur, m_sceneOutput, m_layerTrees[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
+    }
     const bool sceneChanged = wlr_scene_output_needs_frame(m_sceneOutput);
     if (sceneChanged) {
       // Scene motion under a stationary cursor must reach the client before its next press.
@@ -1284,6 +1330,10 @@ namespace umbriel {
       wlr_scene_node_destroy(&m_optimizedBlur->node);
     }
     m_optimizedBlur = nullptr;
+    if (m_sharedBlur != nullptr && m_server->scene() != nullptr) {
+      wlr_scene_node_destroy(&m_sharedBlur->node);
+    }
+    m_sharedBlur = nullptr;
     m_server->removeOutput(this);
   }
 

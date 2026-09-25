@@ -187,6 +187,9 @@ blur = true
 blur_ignore_alpha = 0.5
 blur_popups = true
 blur_optimized = false
+# Blur one backdrop shared by the bar and its panels instead: they show the
+# windows behind them and meet without a seam. Applies to top-layer surfaces.
+# blur_shared = true
 
 # ==============================================================================
 # Overview

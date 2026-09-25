@@ -28,9 +28,30 @@ exact match.
 | `blur_popups` | bool | Enable/disable blur for descendant XDG popups. |
 | `blur_ignore_alpha` | float | Skip blur below an alpha threshold. |
 | `blur_optimized` | bool | Override the global optimized-blur choice. |
+| `blur_shared` | bool | Blur a backdrop shared with other top-layer surfaces, captured above the windows. |
 
 Layer-shell blur is off by default. Every matching rule contributes its
 settings, and later values take precedence.
+
+With `blur_shared = true`, top-layer surfaces blur one backdrop that Umbriel
+captures above the windows. They show the windows behind them and never blur
+each other, so adjacent surfaces, such as a bar and a panel attached to it,
+meet without a seam. `blur_shared` takes precedence over `blur_optimized`. It
+has no effect on surfaces in other layers or on popups, which keep their usual
+blur.
+
+```toml
+[[layer_rule]]
+match.namespace = "^noctalia-(bar-[^\"]+|panel|attached-panel)$"
+blur = true
+blur_shared = true
+```
+
+Umbriel captures only the areas behind visible surfaces that share the
+backdrop, and on each frame redraws only the parts whose blur can change. A
+single surface, usually a bar, blurs only what is directly behind it, so windows
+below it cause no capture work. The backdrop takes one output-sized buffer while
+a layer rule sets `blur_shared`.
 
 ## Keyboard focus
 

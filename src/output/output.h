@@ -2,6 +2,7 @@
 
 #include "core/dirty.h"
 #include "output/frame_schedule.h"
+#include "scene/blur_backdrop.h"
 
 #include <cstdint>
 #include <memory>
@@ -140,6 +141,7 @@ namespace umbriel {
     wlr_output_layout_output* addToLayout();
     void arrangeLayer(wlr_scene_tree* tree, const wlr_box* fullArea, wlr_box* usableArea, bool exclusive);
     void updateOptimizedBlur(const wlr_box& fullArea);
+    void updateSharedBlur(const wlr_box& fullArea);
 
     Server* m_server = nullptr;
     wlr_output* m_output = nullptr;
@@ -151,6 +153,9 @@ namespace umbriel {
     wlr_scene_tree* m_fullscreenRoot = nullptr;
     wlr_scene_tree* m_pinnedRoot = nullptr;
     wlr_scene_optimized_blur* m_optimizedBlur = nullptr;
+    // Captures the shared blur backdrop above the windows for top-layer surfaces with `blur_shared`.
+    wlr_scene_optimized_blur* m_sharedBlur = nullptr;
+    BlurBackdrop m_blurBackdrop;
     std::unique_ptr<WorkspaceGroup> m_workspaceGroup;
     wlr_box m_localUsableArea{};
     int m_arrangedLayoutX = 0;

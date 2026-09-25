@@ -2326,7 +2326,8 @@ namespace umbriel {
         keys.boolean("blur", rule.blur)
             .boolean("blur_popups", rule.blurPopups)
             .real("blur_ignore_alpha", 0.0, 1.0, rule.ignoreAlpha)
-            .boolean("blur_optimized", rule.optimized);
+            .boolean("blur_optimized", rule.optimized)
+            .boolean("blur_shared", rule.shared);
 
         loaded.layerRules.push_back(std::move(rule));
       }
