@@ -1858,7 +1858,7 @@ void fx_render_pass_add_box_shadow(
 // Renders the blur for each damaged rect and swaps the buffer
 static void render_blur_segments(
     struct fx_gles_render_pass* pass, struct fx_render_blur_pass_options* fx_options, struct blur_shader* shader,
-    int sample_divisor
+    int sample_divisor, const struct wlr_box* sample_box
 ) {
   struct fx_render_texture_options* tex_options = &fx_options->tex_options;
   struct wlr_render_texture_options* options = &tex_options->base;
@@ -1915,9 +1915,26 @@ static void render_blur_segments(
   const int sample_width = options->texture->width / sample_divisor + (options->texture->width % sample_divisor != 0);
   const int sample_height =
       options->texture->height / sample_divisor + (options->texture->height % sample_divisor != 0);
+  float min_x = 0.5f;
+  float min_y = 0.5f;
+  float max_x = sample_width - 0.5f;
+  float max_y = sample_height - 0.5f;
+  // Keep the kernel inside the blurred surface's footprint, duplicating its
+  // edge texels, so neighbouring content (e.g. a bar above an attached panel)
+  // doesn't bleed in along the edges. Matches CSS backdrop-filter.
+  if (sample_box != NULL && !wlr_box_empty(sample_box)) {
+    const float box_x0 = (float)sample_box->x / sample_divisor + 0.5f;
+    const float box_y0 = (float)sample_box->y / sample_divisor + 0.5f;
+    const float box_x1 = (float)(sample_box->x + sample_box->width) / sample_divisor - 0.5f;
+    const float box_y1 = (float)(sample_box->y + sample_box->height) / sample_divisor - 0.5f;
+    min_x = fmaxf(min_x, fminf(box_x0, box_x1));
+    min_y = fmaxf(min_y, fminf(box_y0, box_y1));
+    max_x = fmaxf(min_x, fminf(max_x, fmaxf(box_x0, box_x1)));
+    max_y = fmaxf(min_y, fminf(max_y, fmaxf(box_y0, box_y1)));
+  }
   glUniform4f(
-      shader->sample_bounds, 0.5f / options->texture->width, 0.5f / options->texture->height,
-      (sample_width - 0.5f) / options->texture->width, (sample_height - 0.5f) / options->texture->height
+      shader->sample_bounds, min_x / options->texture->width, min_y / options->texture->height,
+      max_x / options->texture->width, max_y / options->texture->height
   );
 
   if (shader == &renderer->shaders.blur1) {
@@ -2006,8 +2023,9 @@ static void render_blur_effects(struct fx_gles_render_pass* pass, struct fx_rend
 
 // Blurs the fx_options current_buffer content and returns the blurred framebuffer.
 // Returns NULL when the blur parameters reach 0.
-static struct fx_framebuffer*
-get_main_buffer_blur(struct fx_gles_render_pass* pass, struct fx_render_blur_pass_options* fx_options) {
+static struct fx_framebuffer* get_main_buffer_blur(
+    struct fx_gles_render_pass* pass, struct fx_render_blur_pass_options* fx_options, bool clamp_to_surface
+) {
   if (pass->fx_offscreen_buffers == NULL) {
     wlr_log(WLR_ERROR, "FX Pass offscreen buffers not initialized. Skipping getting blur...");
     return NULL;
@@ -2027,6 +2045,14 @@ get_main_buffer_blur(struct fx_gles_render_pass* pass, struct fx_render_blur_pas
     return NULL;
   }
   fx_options->blur_data = &blur_data;
+
+  // The surface box in buffer coordinates, captured before dst_box is replaced
+  // by the full buffer below.
+  struct wlr_box sample_box = {0};
+  if (clamp_to_surface && fx_options->tex_options.clip_box != NULL) {
+    wlr_box_intersection(&sample_box, fx_options->tex_options.clip_box, &buffer_bounds);
+  }
+  const struct wlr_box* sample_box_ptr = wlr_box_empty(&sample_box) ? NULL : &sample_box;
 
   struct fx_offscreen_buffers* fbos = pass->fx_offscreen_buffers;
   if (ensure_offscreen_buffer(pass, &fbos->effects_buffer, true) == NULL
@@ -2097,14 +2123,14 @@ get_main_buffer_blur(struct fx_gles_render_pass* pass, struct fx_render_blur_pas
   // Downscale
   for (int i = 0; i < blur_data.num_passes; ++i) {
     wlr_region_scale(&scaled_damage, &damage, 1.0f / (1 << (i + 1)));
-    render_blur_segments(pass, fx_options, &renderer->shaders.blur1, 1 << i);
+    render_blur_segments(pass, fx_options, &renderer->shaders.blur1, 1 << i, sample_box_ptr);
   }
 
   // Upscale
   for (int i = blur_data.num_passes - 1; i >= 0; --i) {
     // when upsampling we make the region twice as big
     wlr_region_scale(&scaled_damage, &damage, 1.0f / (1 << i));
-    render_blur_segments(pass, fx_options, &renderer->shaders.blur2, 1 << (i + 1));
+    render_blur_segments(pass, fx_options, &renderer->shaders.blur2, 1 << (i + 1), sample_box_ptr);
   }
 
   pixman_region32_fini(&scaled_damage);
@@ -2161,12 +2187,18 @@ void fx_render_pass_add_blur(struct fx_gles_render_pass* pass, struct fx_render_
   // The optimized buffers only hold content once an optimized blur node has
   // rendered on this output at the current size. Without that, blur the live
   // pass target rather than an empty buffer.
-  const bool use_optimized = fx_options->use_optimized_blur
+  // The shared buffer keeps no non-blurred copy, so a shared blur below full
+  // strength blurs the live pass target instead.
+  const bool use_shared = fx_options->use_shared_blur && !has_strength
+      && optimized_buffer_ready(pass, fbos->shared_blur_buffer);
+  const bool use_optimized = !fx_options->use_shared_blur && fx_options->use_optimized_blur
       && optimized_buffer_ready(pass, fbos->optimized_blur_buffer)
       && optimized_buffer_ready(pass, fbos->optimized_no_blur_buffer);
   struct fx_framebuffer* buffer = NULL;
   TRACY_ZONE_TEXT_f("Use Optimized Blur: %d", fx_options->use_optimized_blur);
-  if (!use_optimized || has_strength) {
+  if (use_shared) {
+    buffer = fbos->shared_blur_buffer;
+  } else if (!use_optimized || has_strength) {
     // Render the blur into its own buffer
     struct fx_render_blur_pass_options blur_options = *fx_options;
     if (use_optimized) {
@@ -2176,11 +2208,11 @@ void fx_render_pass_add_blur(struct fx_gles_render_pass* pass, struct fx_render_
     } else {
       blur_options.current_buffer = animation_backdrop(pass);
     }
-    buffer = get_main_buffer_blur(pass, &blur_options);
+    buffer = get_main_buffer_blur(pass, &blur_options, false);
   } else {
     buffer = fbos->optimized_blur_buffer;
   }
-  TRACY_ZONE_TEXT_f("Optimized Blur Successfully Used: %d", buffer && use_optimized);
+  TRACY_ZONE_TEXT_f("Optimized Blur Successfully Used: %d", buffer && (use_optimized || use_shared));
   if (!buffer) {
     goto finish;
   }
@@ -2274,25 +2306,49 @@ bool fx_render_pass_add_optimized_blur(
 
   pixman_region32_t clip;
   pixman_region32_init_rect(&clip, dst_box.x, dst_box.y, dst_box.width, dst_box.height);
+  if (fx_options->capture_region != NULL) {
+    pixman_region32_intersect(&clip, &clip, fx_options->capture_region);
+  }
 
   // Render the blur into its own buffer
   struct fx_offscreen_buffers* fbos = pass->fx_offscreen_buffers;
-  struct fx_framebuffer* blur_buffer = ensure_offscreen_buffer(pass, &fbos->optimized_blur_buffer, false);
-  struct fx_framebuffer* no_blur_buffer = ensure_offscreen_buffer(pass, &fbos->optimized_no_blur_buffer, false);
+  // A shared capture is only sampled at full strength, so it needs no
+  // non-blurred copy.
+  const bool shared = fx_options->use_shared_blur;
+  struct fx_framebuffer* blur_buffer =
+      ensure_offscreen_buffer(pass, shared ? &fbos->shared_blur_buffer : &fbos->optimized_blur_buffer, false);
+  struct fx_framebuffer* no_blur_buffer =
+      shared ? NULL : ensure_offscreen_buffer(pass, &fbos->optimized_no_blur_buffer, false);
   struct fx_framebuffer* fx_buffer = NULL;
   struct fx_framebuffer* backdrop = animation_backdrop(pass);
-  if (blur_buffer != NULL && no_blur_buffer != NULL) {
+  if (blur_buffer != NULL && (shared || no_blur_buffer != NULL)) {
     struct fx_render_blur_pass_options blur_options = *fx_options;
     blur_options.current_buffer = backdrop;
     blur_options.tex_options.base.clip = &clip;
-    fx_buffer = get_main_buffer_blur(pass, &blur_options);
+    const bool clamp = fx_options->sample_clamp != NULL && !wlr_box_empty(fx_options->sample_clamp);
+    if (clamp) {
+      blur_options.tex_options.clip_box = fx_options->sample_clamp;
+    }
+    fx_buffer = get_main_buffer_blur(pass, &blur_options, clamp);
   }
   if (fx_buffer != NULL) {
+    // A partial capture writes back only the pixels whose blur samples stayed
+    // inside the re-rendered region.
+    pixman_region32_t write_clip;
+    pixman_region32_init(&write_clip);
+    if (fx_options->write_region != NULL) {
+      pixman_region32_intersect(&write_clip, fx_options->write_region, &clip);
+    } else {
+      pixman_region32_copy(&write_clip, &clip);
+    }
     // Render the newly blurred content into the blur_buffer
-    fx_render_pass_read_to_buffer(pass, &clip, blur_buffer, fx_buffer);
+    fx_render_pass_read_to_buffer(pass, &write_clip, blur_buffer, fx_buffer);
 
     // Save the current scene pass state
-    fx_render_pass_read_to_buffer(pass, &clip, no_blur_buffer, backdrop);
+    if (no_blur_buffer != NULL) {
+      fx_render_pass_read_to_buffer(pass, &write_clip, no_blur_buffer, backdrop);
+    }
+    pixman_region32_fini(&write_clip);
   }
 
   pixman_region32_fini(&clip);

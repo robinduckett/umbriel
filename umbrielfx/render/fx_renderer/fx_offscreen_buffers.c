@@ -22,6 +22,7 @@ static void clear_effect_buffers(struct fx_offscreen_buffers *fbos) {
 	}
 	drop_framebuffer(&fbos->optimized_blur_buffer);
 	drop_framebuffer(&fbos->optimized_no_blur_buffer);
+	drop_framebuffer(&fbos->shared_blur_buffer);
 	drop_framebuffer(&fbos->blur_saved_pixels_buffer);
 	drop_framebuffer(&fbos->effects_buffer);
 	drop_framebuffer(&fbos->effects_buffer_swapped);
@@ -88,6 +89,18 @@ void fx_renderer_clear_animation_buffers(struct wlr_output *output) {
 		drop_framebuffer(&fbos->animation_buffers[i]);
 	}
 	drop_framebuffer(&fbos->animation_backdrop);
+}
+
+void fx_renderer_clear_shared_blur_buffer(struct wlr_output *output) {
+	if (output == NULL) {
+		return;
+	}
+	struct wlr_addon *addon = wlr_addon_find(&output->addons, output, &fbos_addon_impl);
+	if (addon == NULL) {
+		return;
+	}
+	struct fx_offscreen_buffers *fbos = wl_container_of(addon, fbos, addon);
+	drop_framebuffer(&fbos->shared_blur_buffer);
 }
 
 void fx_offscreen_buffers_invalidate_blend(struct wlr_output *output) {

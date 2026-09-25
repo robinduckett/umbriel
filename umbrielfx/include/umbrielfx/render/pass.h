@@ -143,6 +143,13 @@ struct fx_render_blur_pass_options {
 	float blur_strength;
 	struct fx_corner_fradii corners;
 	struct clipped_fregion clipped_region;
+	// Sample (blur) or fill (optimized blur) the shared buffer instead of the
+	// cached background.
+	bool use_shared_blur;
+	// Optimized blur only: partial capture regions and optional sample clamp.
+	const pixman_region32_t *capture_region;
+	const pixman_region32_t *write_region;
+	const struct wlr_box *sample_clamp;
 };
 
 struct fx_gles_render_pass *fx_get_render_pass(struct wlr_render_pass *render_pass);

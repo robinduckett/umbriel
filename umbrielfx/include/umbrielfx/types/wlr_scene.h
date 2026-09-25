@@ -212,12 +212,31 @@ struct wlr_scene_blur {
 	bool should_only_blur_bottom_layer;
 
 	struct linked_node transparency_mask_source;
+
+	// Sample the shared backdrop of a shared optimized blur node instead of
+	// the cached background. Takes precedence over
+	// should_only_blur_bottom_layer.
+	bool use_shared_blur;
+
+	// Node-local area that actually shows blur, if known (e.g. a surface's
+	// input region excluding a shadow margin). Empty = the whole node.
+	struct wlr_box sample_hint;
 };
 
 /** A scene-graph node telling SceneFX to render the optimized blur */
 struct wlr_scene_optimized_blur {
 	struct wlr_scene_node node;
 	int width, height;
+	// Partial capture (output buffer coordinates), set by
+	// wlr_scene_optimized_blur_capture(). When non-empty, only this region is
+	// re-captured and only write_region is written back.
+	pixman_region32_t capture_region;
+	pixman_region32_t write_region;
+	struct wlr_box sample_clamp; // keep blur samples inside this box; empty = off
+	bool partial;
+	// Captures the shared backdrop sampled by blur nodes with
+	// use_shared_blur, instead of the cached background.
+	bool shared;
 
 	bool dirty;
 };
@@ -785,6 +804,27 @@ void wlr_scene_blur_set_strength(struct wlr_scene_blur *blur, float strength);
 void wlr_scene_blur_set_ignore_alpha(struct wlr_scene_blur *blur, float ignore_alpha);
 
 /**
+ * Node-local area that actually shows blur, if smaller than the node (e.g. a
+ * surface's input region, excluding a transparent shadow margin). Only used to
+ * size the shared optimized-blur capture; it does not change what is drawn.
+ * NULL or an empty box means the whole node.
+ */
+void wlr_scene_blur_set_sample_hint(struct wlr_scene_blur *blur, const struct wlr_box *hint);
+
+/**
+ * Samples the backdrop captured by a shared optimized blur node on the output
+ * instead of the cached background. Surfaces that share it never sample each
+ * other. Blur strength below 1.0 falls back to the live backdrop.
+ */
+void wlr_scene_blur_set_use_shared_blur(struct wlr_scene_blur *blur, bool use_shared_blur);
+
+/**
+ * Returns true when any part of the blur node is visible on an output, that
+ * is, not disabled, clipped away, or covered by opaque content above it.
+ */
+bool wlr_scene_blur_is_visible(const struct wlr_scene_blur *blur);
+
+/**
  * Sets the region where to clip the blur.
  *
  * For there to be corner rounding of the clipped region, the corner radius and
@@ -826,6 +866,12 @@ void wlr_scene_optimized_blur_set_size(struct wlr_scene_optimized_blur *blur_nod
  * wallpaper.
  */
 void wlr_scene_optimized_blur_mark_dirty(struct wlr_scene_optimized_blur *blur_node);
+
+/**
+ * Makes an optimized blur node capture the shared backdrop sampled by blur
+ * nodes with use_shared_blur. It keeps no non-blurred copy.
+ */
+void wlr_scene_optimized_blur_set_shared(struct wlr_scene_optimized_blur *blur_node, bool shared);
 
 /**
  * Add a node displaying a buffer to the scene-graph.
@@ -1020,6 +1066,21 @@ struct wlr_scene_output_state_options {
  * is needed and an output commit can be skipped for the current frame.
  */
 bool wlr_scene_output_needs_frame(struct wlr_scene_output *scene_output);
+/** Returns how far (in buffer pixels) the scene's blur samples beyond a pixel. */
+int wlr_scene_blur_reach(struct wlr_scene *scene);
+/**
+ * Re-capture part of an optimized blur node on one output (dirty-rect capture).
+ * `capture` is re-rendered beneath the node and blurred, `write` (a subset
+ * whose blur samples stay within `capture`) is written back. Regions are in
+ * the output's buffer coordinates. `sample_clamp` optionally keeps samples
+ * inside a box. Accumulates until the next render.
+ */
+void wlr_scene_optimized_blur_capture(struct wlr_scene_optimized_blur *blur_node,
+	struct wlr_scene_output *scene_output, const pixman_region32_t *capture,
+	const pixman_region32_t *write, const struct wlr_box *sample_clamp);
+/** Copies the damage pending for the next frame (output buffer coordinates). */
+void wlr_scene_output_get_pending_damage(struct wlr_scene_output *scene_output,
+	pixman_region32_t *out);
 
 /**
  * Render and commit an output.

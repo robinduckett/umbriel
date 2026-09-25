@@ -21,6 +21,8 @@ struct fx_renderer *fx_get_renderer(struct wlr_renderer *wlr_renderer);
 bool fx_renderer_check_ext(struct wlr_renderer *renderer, const char *ext);
 GLuint fx_renderer_get_buffer_fbo(struct wlr_renderer *renderer, struct wlr_buffer *buffer);
 void fx_renderer_clear_output_effect_buffers(struct wlr_output *output);
+/* Releases the shared blur buffer once no shared blur node remains. */
+void fx_renderer_clear_shared_blur_buffer(struct wlr_output *output);
 
 /**
  * Begins a pass for an output swapchain buffer. HDR passes use output-local

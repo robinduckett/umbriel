@@ -32,6 +32,10 @@ struct fx_offscreen_buffers {
 	// Contains the non-blurred background for tiled windows. Used for blurring
 	// optimized surfaces with an alpha. Just as inefficient as the regular blur.
 	struct fx_framebuffer *optimized_no_blur_buffer;
+	// Contains the blurred backdrop shared by top-layer surfaces, captured
+	// above the windows. Sampled only at full strength, so it has no
+	// non-blurred copy.
+	struct fx_framebuffer *shared_blur_buffer;
 	// Contains the original pixels to draw over the areas where artifact are visible
 	struct fx_framebuffer *blur_saved_pixels_buffer;
 	// Blur swaps between the two effects buffers every time it scales the image
