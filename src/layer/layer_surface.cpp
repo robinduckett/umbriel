@@ -274,6 +274,7 @@ namespace umbriel {
         .ignoreAlpha = static_cast<float>(m_rule.ignoreAlpha.value_or(0.0)),
         .enabled = m_rule.blur.value_or(false),
         .optimized = m_rule.optimized,
+        .shellSurface = true,
     };
   }
 
@@ -282,6 +283,7 @@ namespace umbriel {
         .ignoreAlpha = static_cast<float>(m_rule.ignoreAlpha.value_or(0.0)),
         .enabled = m_rule.blurPopups.value_or(false),
         .optimized = m_rule.optimized,
+        .shellSurface = true,
     };
   }
 

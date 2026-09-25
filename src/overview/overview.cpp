@@ -1459,7 +1459,11 @@ namespace umbriel {
       if (config().overview.backgroundBlur && config().appearance.blur.enabled) {
         state->backgroundBlur = wlr_scene_blur_create(m_server->overviewBlurTree(), 1, 1);
         if (state->backgroundBlur != nullptr) {
-          wlr_scene_blur_set_should_only_blur_bottom_layer(state->backgroundBlur, config().appearance.blur.optimized);
+          // A capture above the windows only covers shell surfaces, so the overview blurs the live backdrop instead.
+          const Config::Appearance::Blur& blur = config().appearance.blur;
+          wlr_scene_blur_set_should_only_blur_bottom_layer(
+              state->backgroundBlur, blur.optimized && !blur.capturesWindows()
+          );
         }
       }
       const std::array<float, 4> backgroundTint = tint(config().colors.overview.backgroundTint, 0.0);

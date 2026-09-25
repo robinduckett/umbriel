@@ -104,6 +104,7 @@ Borders render outside window content and are included in layout spacing.
 [appearance.blur]
 enabled = true
 optimized = true
+capture_source = "background"
 passes = 3
 radius = 5
 noise = 0.02
@@ -120,6 +121,7 @@ only where a surface is transparent.
 | --- | --- | --- |
 | `enabled` | `true` | Enable blur rendering. |
 | `optimized` | `true` | Share one cached background blur across surfaces on an output. |
+| `capture_source` | `"background"` | What optimized blur captures: `"background"` or `"windows"`. |
 | `passes` | `3` | Blur passes from 0 to 8. |
 | `radius` | `5` | Blur radius from 0 to 100. |
 | `noise` | `0.02` | Noise overlay from 0.0 to 1.0. |
@@ -130,6 +132,20 @@ only where a surface is transparent.
 Optimized blur samples the background beneath the window stack. Set it to
 `false` when translucent surfaces should blur the surfaces directly behind
 them, at a higher rendering cost.
+
+With `capture_source = "windows"`, optimized blur is captured above the windows
+instead, just below shell surfaces such as bars, docks, and panels. Those
+surfaces then blur the windows behind them, and neighbouring surfaces, like a
+bar and a panel attached to it, blur one continuous backdrop and meet without a
+seam. Only shell surfaces use this capture: windows, their popups, and the
+overview background blur the live backdrop behind them instead, as if
+`optimized` were `false`.
+
+The capture covers only the shell surfaces that use optimized blur, and only
+the part whose blur can have changed is redrawn each frame. A lone surface,
+usually a bar, blurs only what is directly behind it, so windows below it do
+not cause any work. Its cost grows with how often content behind a surface
+changes, for example a panel open over a playing video.
 
 ### Shadow
 

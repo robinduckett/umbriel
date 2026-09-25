@@ -987,6 +987,31 @@ UMBRIEL_TEST(overviewBackgroundBlurLoads) {
   CHECK(!store.config().overview.backgroundBlur);
 }
 
+UMBRIEL_TEST(blurCaptureSourceLoads) {
+  using CaptureSource = umbriel::Config::Appearance::Blur::CaptureSource;
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write("[appearance.blur]\nradius = 3\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().appearance.blur.captureSource == CaptureSource::Background);
+
+  file.write("[appearance.blur]\ncapture_source = \"windows\"\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().appearance.blur.captureSource == CaptureSource::Windows);
+  CHECK(!containsDiagnostic(store, "capture_source"));
+
+  file.write("[appearance.blur]\ncapture_source = \"everything\"\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().appearance.blur.captureSource == CaptureSource::Background);
+  CHECK(containsDiagnostic(store, R"(unknown appearance.blur.capture_source "everything")"));
+
+  file.write("[appearance.blur]\ncapture_source = true\n");
+  CHECK(store.reload().success);
+  CHECK(containsDiagnostic(store, "appearance.blur.capture_source must be a string"));
+}
+
 UMBRIEL_TEST(overviewScrollFactorLoadsIndependently) {
   const TempConfig file;
   ConfigStore& store = umbriel::configStore();

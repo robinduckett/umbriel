@@ -29,6 +29,7 @@ unit_tests = [
   ['master-layout', ['unit/master_layout.cpp'], []],
   ['cheatsheet-rows', ['unit/cheatsheet_rows.cpp'], []],
   ['shortcut-labels', ['unit/shortcut_labels.cpp'], []],
+  ['blur-backdrop-regions', ['unit/blur_backdrop_regions.cpp'], []],
   ['border-ring', ['unit/border_ring.cpp'], []],
   ['floating', ['unit/floating.cpp'], []],
   ['preset-cycle', ['unit/preset_cycle.cpp'], []],

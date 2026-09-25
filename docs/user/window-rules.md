@@ -147,7 +147,7 @@ and sets its extent.
 | `blur` | Enable or disable window blur. |
 | `blur_popups` | Apply blur to descendant XDG popups. |
 | `blur_ignore_alpha` | Skip blur below an alpha threshold. |
-| `blur_optimized` | Override the global optimized-blur choice. |
+| `blur_optimized` | Override the global optimized-blur choice. Has no effect with `appearance.blur.capture_source = "windows"`, where windows always blur the live backdrop. |
 | `focus_on_activate` | Override activation focus for this window. |
 | `vrr` | Override the focused output's VRR policy. |
 | `tearing` | Request or veto asynchronous presentation. |

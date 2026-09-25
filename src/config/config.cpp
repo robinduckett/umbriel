@@ -353,6 +353,31 @@ namespace umbriel {
       return std::nullopt;
     }
 
+    void readBlurCaptureSource(Section& section, Config::Appearance::Blur::CaptureSource& target) {
+      using CaptureSource = Config::Appearance::Blur::CaptureSource;
+      const toml::node* node = section.take("capture_source");
+      if (node == nullptr) {
+        return;
+      }
+      const auto* value = node->as_string();
+      if (value == nullptr) {
+        warnAt(node->source(), R"(appearance.blur.capture_source must be a string ("background" or "windows"))");
+        return;
+      }
+      const std::string_view source = value->get();
+      if (source == "background") {
+        target = CaptureSource::Background;
+        return;
+      }
+      if (source == "windows") {
+        target = CaptureSource::Windows;
+        return;
+      }
+      warnAt(
+          node->source(), R"(unknown appearance.blur.capture_source "{}" (expected "background" or "windows"))", source
+      );
+    }
+
     std::optional<MasterPosition> readMasterPosition(Section& section, std::string_view context) {
       const toml::node* node = section.take("position");
       if (node == nullptr) {
@@ -1242,6 +1267,7 @@ namespace umbriel {
               .real("brightness", 0.0, 2.0, appearance.blur.brightness)
               .real("contrast", 0.0, 2.0, appearance.blur.contrast)
               .real("saturation", 0.0, 2.0, appearance.blur.saturation);
+          readBlurCaptureSource(blur, appearance.blur.captureSource);
         });
         s.sub("shadow", [&](Section& shadow) {
           shadow.boolean("enabled", appearance.shadow.enabled)

@@ -26,6 +26,7 @@
 #include "workspace/workspace.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <ctime>
 #include <drm_fourcc.h>
@@ -841,13 +842,25 @@ namespace umbriel {
       return;
     }
 
+    // capture_source picks where the shared blur is captured: above the background layer, or at the bottom of the top
+    // layer so it includes the windows and blurred shell surfaces never sample each other. Moving it needs a new node.
+    const bool aboveWindows = config().appearance.blur.capturesWindows();
+    if (m_optimizedBlur != nullptr && m_optimizedBlurAboveWindows != aboveWindows) {
+      wlr_scene_node_destroy(&m_optimizedBlur->node);
+      m_optimizedBlur = nullptr;
+    }
     if (m_optimizedBlur == nullptr) {
-      m_optimizedBlur = wlr_scene_optimized_blur_create(
-          m_server->shellLayerTree(ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND), fullArea.width, fullArea.height
-      );
+      const uint32_t captureLayer = aboveWindows ? ZWLR_LAYER_SHELL_V1_LAYER_TOP : ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+      m_optimizedBlur =
+          wlr_scene_optimized_blur_create(m_server->shellLayerTree(captureLayer), fullArea.width, fullArea.height);
       if (m_optimizedBlur == nullptr) {
         return;
       }
+      if (aboveWindows) {
+        wlr_scene_node_lower_to_bottom(&m_optimizedBlur->node);
+      }
+      m_optimizedBlurAboveWindows = aboveWindows;
+      m_blurBackdrop.invalidate();
     }
 
     const bool changed = m_optimizedBlur->node.x != m_sceneOutput->x
@@ -859,10 +872,12 @@ namespace umbriel {
     wlr_scene_optimized_blur_set_size(m_optimizedBlur, fullArea.width, fullArea.height);
     if (changed) {
       wlr_scene_optimized_blur_mark_dirty(m_optimizedBlur);
+      m_blurBackdrop.invalidate();
     }
   }
 
   void Output::markBlurBackgroundDirty() {
+    m_blurBackdrop.invalidate();
     if (m_optimizedBlur != nullptr) {
       wlr_scene_optimized_blur_mark_dirty(m_optimizedBlur);
     }
@@ -1080,6 +1095,14 @@ namespace umbriel {
     // "nothing to render" path, they never commit again -> damage stays clean -> wlr_scene_output_needs_frame returns
     // false forever -> compositor parks in epoll_wait. (Reproducible with any mailbox/FIFO Vulkan game.)
     bool commitFailed = false;
+    // Keep the shared blur backdrop current where blurred shell surfaces need it. A capture adds damage, so this runs
+    // before deciding whether to render.
+    if (m_optimizedBlurAboveWindows && m_optimizedBlur != nullptr && wlr_scene_output_needs_frame(m_sceneOutput)) {
+      const std::array trees{
+          m_layerTrees[ZWLR_LAYER_SHELL_V1_LAYER_TOP], m_layerTrees[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], m_popupTree
+      };
+      m_blurBackdrop.update(m_optimizedBlur, m_sceneOutput, trees);
+    }
     const bool sceneChanged = wlr_scene_output_needs_frame(m_sceneOutput);
     if (sceneChanged) {
       // Scene motion under a stationary cursor must reach the client before its next press.

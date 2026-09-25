@@ -223,6 +223,17 @@ UMBRIEL_TEST(borderColorChangesAreColorChangesThatRefreshChrome) {
   CHECK(!effects.sceneBlur);
 }
 
+UMBRIEL_TEST(blurCaptureSourceRebuildsTheSharedBlur) {
+  const Config before;
+  Config after;
+  after.appearance.blur.captureSource = Config::Appearance::Blur::CaptureSource::Windows;
+  const ConfigEffects effects = ConfigEffects::between(before, after);
+  // The capture node moves between layers, window blur stops using it, and layer surfaces re-apply their blur.
+  CHECK(effects.sceneBlur);
+  CHECK(effects.viewChrome);
+  CHECK(effects.layerEffects);
+}
+
 UMBRIEL_TEST(listSectionsAreCompared) {
   const Config before;
 

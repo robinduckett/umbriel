@@ -14,6 +14,9 @@ namespace umbriel {
     float ignoreAlpha = 0.0F;
     std::optional<bool> enabled;
     std::optional<bool> optimized;
+    // Layer-shell surfaces and their popups. When optimized blur is captured above the windows, only these may use it:
+    // anything else in or below the window stack would sample a capture that contains itself.
+    bool shellSurface = false;
   };
 
   // True when the surface's opaque region does not cover surfaceBox, given in surface-local coordinates.

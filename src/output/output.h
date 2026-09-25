@@ -2,6 +2,7 @@
 
 #include "core/dirty.h"
 #include "output/frame_schedule.h"
+#include "scene/blur_backdrop.h"
 
 #include <cstdint>
 #include <memory>
@@ -151,6 +152,8 @@ namespace umbriel {
     wlr_scene_tree* m_fullscreenRoot = nullptr;
     wlr_scene_tree* m_pinnedRoot = nullptr;
     wlr_scene_optimized_blur* m_optimizedBlur = nullptr;
+    bool m_optimizedBlurAboveWindows = false;
+    BlurBackdrop m_blurBackdrop;
     std::unique_ptr<WorkspaceGroup> m_workspaceGroup;
     wlr_box m_localUsableArea{};
     int m_arrangedLayoutX = 0;

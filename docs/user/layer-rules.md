@@ -27,7 +27,7 @@ exact match.
 | `blur` | bool | Enable/disable blur for the layer surface. |
 | `blur_popups` | bool | Enable/disable blur for descendant XDG popups. |
 | `blur_ignore_alpha` | float | Skip blur below an alpha threshold. |
-| `blur_optimized` | bool | Override the global optimized-blur choice. |
+| `blur_optimized` | bool | Override the global optimized-blur choice. With `appearance.blur.capture_source = "windows"`, optimized layer surfaces blur the windows behind them. |
 
 Layer-shell blur is off by default. Every matching rule contributes its
 settings, and later values take precedence.

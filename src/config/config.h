@@ -505,14 +505,19 @@ namespace umbriel {
       // rule or client transparency shows the desktop instead.
       bool opaqueFullscreen = true;
       struct Blur {
+        // What the shared (optimized) blur captures: the background layers only, or everything beneath the top shell
+        // layer, windows included, so blurred shell surfaces show the windows behind them.
+        enum class CaptureSource : uint8_t { Background, Windows };
         bool enabled = true;
         bool optimized = true;
+        CaptureSource captureSource = CaptureSource::Background;
         int passes = 3;
         int radius = 5;
         double noise = 0.02;
         double brightness = 0.9;
         double contrast = 0.9;
         double saturation = 1.1;
+        [[nodiscard]] bool capturesWindows() const { return captureSource == CaptureSource::Windows; }
         bool operator==(const Blur&) const = default;
       } blur;
       struct Shadow {

@@ -91,6 +91,13 @@ view, and `WineColorManager::applySurfaceDescriptions`, which walks every
 `wlr_scene_buffer` in the scene with a map lookup per buffer
 ([`wine_color_manager.cpp:1061-1099`](../../src/server/wine_color_manager.cpp)).
 
+With `appearance.blur.capture_source = "windows"`, `BlurBackdrop::update`
+([`blur_backdrop.cpp`](../../src/scene/blur_backdrop.cpp)) also runs there on
+frames with damage. It walks the top, overlay, and popup layer trees for blur
+nodes that use the shared capture, then asks for a partial capture of the part
+whose blur can have changed. The capture adds damage for that region only, so
+it must run before the damage test.
+
 `wlr_scene_output_send_frame_done` at the end of that function is unconditional
 and must stay so (`output.cpp:1140`). Mailbox and FIFO clients block on
 `wl_surface.frame`, so skipping it on the nothing-to-render path stalls them
