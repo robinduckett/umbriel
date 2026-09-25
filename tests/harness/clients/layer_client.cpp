@@ -1,6 +1,9 @@
 // Maps a top exclusive zone, a full-output background layer when the height is zero, or a 200x200 bottom-layer
 // square. It stays mapped until that output closes the layer surface. `keyboard=none|on-demand|exclusive` picks the
 // layer surface's keyboard interactivity, and every keyboard enter and leave the surface receives is logged.
+// `panel=WxH` maps a WxH top-layer surface anchored top-left with no exclusive zone, so it sits directly below an
+// exclusive bar. `fill=AARRGGBB` sets the premultiplied fill colour and `namespace=NAME` the layer namespace, which
+// lets layer rules match translucent surfaces.
 
 #include <wayland-client.h>
 
@@ -14,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <print>
 #include <string>
 #include <sys/mman.h>
@@ -231,7 +235,7 @@ int main(int argc, char** argv) {
   if (argc < 3) {
     std::println(
         "usage: layer-client <output> <exclusive-height-or-zero-background> [bottom-layer] [log-configures] "
-        "[keyboard=none|on-demand|exclusive]"
+        "[keyboard=none|on-demand|exclusive] [panel=WxH] [fill=AARRGGBB] [namespace=NAME]"
     );
     return EXIT_FAILURE;
   }
@@ -245,10 +249,25 @@ int main(int argc, char** argv) {
   State state;
   // A 200x200 bottom-layer square in the top-left corner, which the overview mirrors into every workspace preview.
   bool bottom = false;
+  int panelWidth = 0;
+  int panelHeight = 0;
+  std::optional<uint32_t> fill;
+  std::string layerNamespace = "umbriel-output-restore-regression";
   for (int index = 3; index < argc; ++index) {
     const std::string option = argv[index];
     if (option == "bottom-layer") {
       bottom = true;
+    } else if (option.starts_with("panel=")) {
+      if (std::sscanf(option.c_str(), "panel=%dx%d", &panelWidth, &panelHeight) != 2
+          || panelWidth <= 0
+          || panelHeight <= 0) {
+        std::println(stderr, "layer-client: panel needs a WxH size");
+        return EXIT_FAILURE;
+      }
+    } else if (option.starts_with("fill=")) {
+      fill = static_cast<uint32_t>(std::stoul(option.substr(5), nullptr, 16));
+    } else if (option.starts_with("namespace=")) {
+      layerNamespace = option.substr(10);
     } else if (option == "keyboard=none") {
       state.keyboardInteractivity = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
     } else if (option == "keyboard=on-demand") {
@@ -263,11 +282,15 @@ int main(int argc, char** argv) {
     }
   }
 
-  const bool background = !bottom && exclusiveHeight == 0;
+  const bool panel = panelWidth > 0;
+  const bool background = !bottom && !panel && exclusiveHeight == 0;
   if (background) {
     state.fillColor = 0xFF5577AA;
   } else if (bottom) {
     state.fillColor = 0xFF00FF00;
+  }
+  if (fill) {
+    state.fillColor = *fill;
   }
   state.display = wl_display_connect(nullptr);
   if (state.display == nullptr) {
@@ -297,7 +320,7 @@ int main(int argc, char** argv) {
   }
   state.surface = wl_compositor_create_surface(state.compositor);
   state.layerSurface = zwlr_layer_shell_v1_get_layer_surface(
-      state.layerShell, state.surface, (*selected)->resource, layer, "umbriel-output-restore-regression"
+      state.layerShell, state.surface, (*selected)->resource, layer, layerNamespace.c_str()
   );
   zwlr_layer_surface_v1_add_listener(state.layerSurface, &kLayerSurfaceListener, &state);
   if (state.keyboardInteractivity != ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE) {
@@ -306,6 +329,10 @@ int main(int argc, char** argv) {
   uint32_t anchors = ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
   if (bottom) {
     zwlr_layer_surface_v1_set_size(state.layerSurface, 200, 200);
+  } else if (panel) {
+    zwlr_layer_surface_v1_set_size(
+        state.layerSurface, static_cast<uint32_t>(panelWidth), static_cast<uint32_t>(panelHeight)
+    );
   } else {
     zwlr_layer_surface_v1_set_size(state.layerSurface, 0, background ? 0U : static_cast<uint32_t>(exclusiveHeight));
     anchors |= ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
